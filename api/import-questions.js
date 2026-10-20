@@ -1,9 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL,
+  process.env.VITE_SUPABASE_ANON_KEY
+);
 
 const API_URL = "https://the-trivia-api.com/v2/questions";
 
@@ -20,10 +20,22 @@ function difficultyToNumber(difficulty) {
 }
 
 function chooseCategory(question) {
-  const tags = (question.tags || []).map((tag) => tag.toLowerCase());
-  const text = `${question.question?.text || ""} ${tags.join(" ")}`.toLowerCase();
+  const tags = (question.tags || []).map((tag) =>
+    String(tag).toLowerCase()
+  );
+
+  const questionText = question.question?.text || "";
+
+  const text = [
+    questionText,
+    question.category || "",
+    ...tags,
+  ]
+    .join(" ")
+    .toLowerCase();
 
   // SPORTS
+
   if (
     text.includes("nfl") ||
     text.includes("american football") ||
@@ -47,15 +59,30 @@ function chooseCategory(question) {
   }
 
   if (
+    text.includes("nhl") ||
+    text.includes("ice hockey")
+  ) {
+    return "NHL";
+  }
+
+  if (
     text.includes("soccer") ||
-    text.includes("football club") ||
     text.includes("premier league") ||
-    text.includes("fifa")
+    text.includes("fifa") ||
+    text.includes("football club")
   ) {
     return "SOCCER";
   }
 
-  // ENTERTAINMENT
+  if (
+    text.includes("wrestling") ||
+    text.includes("wwe")
+  ) {
+    return "WRESTLING";
+  }
+
+  // GAMING / COMICS / ANIMATION
+
   if (
     text.includes("video game") ||
     text.includes("gaming") ||
@@ -64,6 +91,13 @@ function chooseCategory(question) {
     text.includes("nintendo")
   ) {
     return "VIDEO GAMES";
+  }
+
+  if (
+    text.includes("pokemon") ||
+    text.includes("pokémon")
+  ) {
+    return "POKÉMON";
   }
 
   if (
@@ -98,33 +132,41 @@ function chooseCategory(question) {
     return "DC COMICS";
   }
 
+  // MUSIC
+
   if (
     text.includes("hip hop") ||
     text.includes("hip-hop") ||
     text.includes("rapper") ||
-    text.includes("rap ")
+    text.includes("rap music")
   ) {
     return "HIP-HOP";
+  }
+
+  if (
+    text.includes("rock music") ||
+    text.includes("rock band")
+  ) {
+    return "ROCK MUSIC";
   }
 
   if (
     text.includes("music") ||
     text.includes("singer") ||
     text.includes("album") ||
-    text.includes("song")
+    text.includes("song") ||
+    text.includes("musician")
   ) {
     return "MUSIC";
   }
 
-  if (
-    text.includes("sitcom")
-  ) {
+  // MOVIES / TV
+
+  if (text.includes("sitcom")) {
     return "SITCOMS";
   }
 
-  if (
-    text.includes("horror")
-  ) {
+  if (text.includes("horror")) {
     return "HORROR";
   }
 
@@ -152,6 +194,8 @@ function chooseCategory(question) {
     return "CELEBRITIES";
   }
 
+  // OTHER FUN CATEGORIES
+
   if (
     text.includes("car") ||
     text.includes("automobile") ||
@@ -176,8 +220,7 @@ function chooseCategory(question) {
     return "FOOD & DRINK";
   }
 
-  // FALLBACK BASED ON API CATEGORY
-  const category = question.category;
+  // FALLBACK CATEGORY
 
   const fallback = {
     film_and_tv: "MOVIES & TV",
@@ -190,109 +233,160 @@ function chooseCategory(question) {
     general_knowledge: "RANDOM KNOWLEDGE",
   };
 
-  return fallback[category] || "RANDOM KNOWLEDGE";
-}
-
-async function getQuestions(category) {
-  const params = new URLSearchParams({
-    limit: "50",
-    categories: category,
-  });
-
-  const response = await fetch(`${API_URL}?${params}`);
-
-  if (!response.ok) {
-    throw new Error(
-      `Trivia API returned ${response.status}`
-    );
-  }
-
-  return response.json();
+  return (
+    fallback[question.category] ||
+    "RANDOM KNOWLEDGE"
+  );
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST" && req.method !== "GET") {
-    return res.status(405).json({
-      error: "Method not allowed",
-    });
-  }
-
   try {
+    // Pick ONE category each time the importer runs.
+    // This keeps each request fast.
+
     const categories = [
       "film_and_tv",
+      "film_and_tv",
+      "film_and_tv",
+
       "music",
+      "music",
+      "music",
+
       "sport_and_leisure",
+      "sport_and_leisure",
+      "sport_and_leisure",
+
       "society_and_culture",
+      "society_and_culture",
+
       "food_and_drink",
+
       "general_knowledge",
+
       "science",
+
       "arts_and_literature",
     ];
 
-    let imported = 0;
-    let duplicates = 0;
-    let attempted = 0;
+    const apiCategory =
+      categories[
+        Math.floor(Math.random() * categories.length)
+      ];
 
-    for (const apiCategory of categories) {
-      const questions = await getQuestions(apiCategory);
+    const params = new URLSearchParams({
+      limit: "50",
+      categories: apiCategory,
+    });
 
-      for (const question of questions) {
-        attempted++;
+    const response = await fetch(
+      `${API_URL}?${params.toString()}`
+    );
 
-        const questionText = question.question?.text?.trim();
-        const answer = question.correctAnswer?.trim();
+    if (!response.ok) {
+      throw new Error(
+        `Trivia API returned status ${response.status}`
+      );
+    }
+
+    const questions = await response.json();
+
+    const rows = questions
+      .map((question) => {
+        const questionText =
+          question.question?.text?.trim();
+
+        const answer =
+          question.correctAnswer?.trim();
 
         if (!questionText || !answer) {
-          continue;
+          return null;
         }
 
-        const row = {
+        return {
           external_id: question.id,
-          category: chooseCategory(question),
-          difficulty: difficultyToNumber(question.difficulty),
+
+          category:
+            chooseCategory(question),
+
+          difficulty:
+            difficultyToNumber(
+              question.difficulty
+            ),
+
           question: questionText,
-          answer: answer,
+
+          answer,
+
           accepted_answers: "",
-          source_url: "https://the-trivia-api.com/",
-          source_name: "The Trivia API",
+
+          source_url:
+            "https://the-trivia-api.com/",
+
+          source_name:
+            "The Trivia API",
+
           tags: question.tags || [],
+
           active: true,
         };
+      })
+      .filter(Boolean);
 
-        const { error } = await supabase
-          .from("question_bank")
-          .insert(row);
-
-        if (error) {
-          if (
-            error.code === "23505" ||
-            error.message?.toLowerCase().includes("duplicate")
-          ) {
-            duplicates++;
-            continue;
-          }
-
-          console.error("Insert error:", error);
-          continue;
-        }
-
-        imported++;
-      }
+    if (rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        imported: 0,
+        message:
+          "The API returned no usable questions.",
+      });
     }
+
+    /*
+      Bulk upsert.
+
+      external_id has a UNIQUE index in Supabase,
+      so questions already imported are ignored.
+    */
+
+    const { data, error } = await supabase
+      .from("question_bank")
+      .upsert(rows, {
+        onConflict: "external_id",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+
+    if (error) {
+      throw error;
+    }
+
+    const imported = data?.length || 0;
 
     return res.status(200).json({
       success: true,
-      attempted,
+
+      apiCategory,
+
+      received: questions.length,
+
       imported,
-      duplicates,
-      message: `Imported ${imported} new unique questions. ${duplicates} duplicates were safely skipped.`,
+
+      duplicatesSkipped:
+        rows.length - imported,
+
+      message:
+        `Received ${questions.length} questions. ` +
+        `Imported ${imported} new unique questions.`,
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       success: false,
-      error: error.message,
+      error:
+        error?.message ||
+        "Unknown importer error",
     });
   }
 }
