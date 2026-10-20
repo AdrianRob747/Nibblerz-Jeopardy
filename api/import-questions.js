@@ -259,33 +259,24 @@ export default async function handler(req, res) {
       History and geography are intentionally
       not requested.
     */
-    const categories = [
-      "film_and_tv",
-      "film_and_tv",
-      "film_and_tv",
-      "film_and_tv",
+    
+const categories = [
+  "film_and_tv",
+  "music",
+  "sport_and_leisure",
+  "society_and_culture",
+];
 
-      "music",
-      "music",
-      "music",
-      "music",
-
-      "sport_and_leisure",
-      "sport_and_leisure",
-      "sport_and_leisure",
-
-      "society_and_culture",
-      "society_and_culture",
-      "society_and_culture",
-
-      "food_and_drink",
-
-      "general_knowledge",
-
-      "science",
-
-      "arts_and_literature",
-    ];
+const bonusCategories = [
+  "film_and_tv",
+  "music",
+  "sport_and_leisure",
+  "society_and_culture",
+  "food_and_drink",
+  "general_knowledge",
+  "science",
+  "arts_and_literature",
+];
 
     /*
       Five API requests per run.
@@ -305,13 +296,19 @@ export default async function handler(req, res) {
       batch <= BATCHES;
       batch++
     ) {
-      const apiCategory =
-        categories[
-          Math.floor(
-            Math.random() *
-              categories.length
-          )
-        ];
+      let apiCategory;
+
+if (batch <= 4) {
+  apiCategory = categories[batch - 1];
+} else {
+  apiCategory =
+    bonusCategories[
+      Math.floor(
+        Math.random() *
+          bonusCategories.length
+      )
+    ];
+}
 
       const params = new URLSearchParams({
         limit: "50",
