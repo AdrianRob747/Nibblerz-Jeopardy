@@ -7,6 +7,15 @@ const supabase = createClient(
 
 const API_URL = "https://the-trivia-api.com/v2/questions";
 
+function normalizeText(value = "") {
+  return String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function difficultyToNumber(difficulty) {
   if (difficulty === "easy") {
     return Math.random() < 0.5 ? 1 : 2;
@@ -24,10 +33,10 @@ function chooseCategory(question) {
     String(tag).toLowerCase()
   );
 
-  const questionText = question.question?.text || "";
+  const q = question.question?.text || "";
 
   const text = [
-    questionText,
+    q,
     question.category || "",
     ...tags,
   ]
@@ -81,7 +90,14 @@ function chooseCategory(question) {
     return "WRESTLING";
   }
 
-  // GAMING / COMICS / ANIMATION
+  // GAMING
+
+  if (
+    text.includes("pokemon") ||
+    text.includes("pokémon")
+  ) {
+    return "POKÉMON";
+  }
 
   if (
     text.includes("video game") ||
@@ -93,12 +109,7 @@ function chooseCategory(question) {
     return "VIDEO GAMES";
   }
 
-  if (
-    text.includes("pokemon") ||
-    text.includes("pokémon")
-  ) {
-    return "POKÉMON";
-  }
+  // ANIMATION / COMICS
 
   if (
     text.includes("anime") ||
@@ -220,7 +231,7 @@ function chooseCategory(question) {
     return "FOOD & DRINK";
   }
 
-  // FALLBACK CATEGORY
+  // API CATEGORY FALLBACKS
 
   const fallback = {
     film_and_tv: "MOVIES & TV",
@@ -242,16 +253,19 @@ function chooseCategory(question) {
 export default async function handler(req, res) {
   try {
     /*
-      Weighted toward what we actually want in Nibblerz.
+      Heavily weighted toward entertainment,
+      sports, music and pop culture.
 
-      Entertainment, music and sports appear more often.
-      History and geography are intentionally excluded.
+      History and geography are intentionally
+      not requested.
     */
     const categories = [
       "film_and_tv",
       "film_and_tv",
       "film_and_tv",
+      "film_and_tv",
 
+      "music",
       "music",
       "music",
       "music",
@@ -260,6 +274,7 @@ export default async function handler(req, res) {
       "sport_and_leisure",
       "sport_and_leisure",
 
+      "society_and_culture",
       "society_and_culture",
       "society_and_culture",
 
@@ -273,25 +288,29 @@ export default async function handler(req, res) {
     ];
 
     /*
-      Each run does 5 batches of up to 50 questions.
-
-      Maximum attempted per run = 250.
-
-      Because external_id is unique, questions already in
-      Supabase are automatically skipped.
+      Five API requests per run.
+      Up to 250 questions received.
     */
     const BATCHES = 5;
 
-    let received = 0;
-    let imported = 0;
-    let duplicatesSkipped = 0;
+    let totalReceived = 0;
+    let totalImported = 0;
+    let duplicateIdsSkipped = 0;
+    let duplicateTextSkipped = 0;
 
     const batchResults = [];
 
-    for (let batch = 1; batch <= BATCHES; batch++) {
+    for (
+      let batch = 1;
+      batch <= BATCHES;
+      batch++
+    ) {
       const apiCategory =
         categories[
-          Math.floor(Math.random() * categories.length)
+          Math.floor(
+            Math.random() *
+              categories.length
+          )
         ];
 
       const params = new URLSearchParams({
@@ -307,42 +326,182 @@ export default async function handler(req, res) {
         batchResults.push({
           batch,
           category: apiCategory,
-          error: `Trivia API status ${response.status}`,
+          error:
+            `Trivia API returned ` +
+            `${response.status}`,
         });
 
         continue;
       }
 
-      const questions = await response.json();
+      const questions =
+        await response.json();
 
-      received += questions.length;
+      totalReceived += questions.length;
 
-      const rows = questions
-        .map((question) => {
-          const questionText =
-            question.question?.text?.trim();
+      /*
+        First remove duplicates that occurred
+        inside this API response itself.
+      */
+      const batchSeenIds = new Set();
+      const batchSeenText = new Set();
 
-          const answer =
-            question.correctAnswer?.trim();
+      const candidates = [];
 
-          if (!questionText || !answer) {
-            return null;
+      for (const question of questions) {
+        const questionText =
+          question.question?.text?.trim();
+
+        const answer =
+          question.correctAnswer?.trim();
+
+        if (
+          !question.id ||
+          !questionText ||
+          !answer
+        ) {
+          continue;
+        }
+
+        const normalized =
+          normalizeText(questionText);
+
+        if (
+          batchSeenIds.has(question.id)
+        ) {
+          duplicateIdsSkipped++;
+          continue;
+        }
+
+        if (
+          batchSeenText.has(normalized)
+        ) {
+          duplicateTextSkipped++;
+          continue;
+        }
+
+        batchSeenIds.add(question.id);
+        batchSeenText.add(normalized);
+
+        candidates.push({
+          original: question,
+          normalized,
+        });
+      }
+
+      if (candidates.length === 0) {
+        batchResults.push({
+          batch,
+          category: apiCategory,
+          received: questions.length,
+          imported: 0,
+          reason:
+            "No usable candidates",
+        });
+
+        continue;
+      }
+
+      /*
+        Check which API IDs already exist.
+      */
+      const candidateIds =
+        candidates.map(
+          (item) => item.original.id
+        );
+
+      const {
+        data: existingIdRows,
+        error: idCheckError,
+      } = await supabase
+        .from("question_bank")
+        .select("external_id")
+        .in("external_id", candidateIds);
+
+      if (idCheckError) {
+        throw idCheckError;
+      }
+
+      const existingIds = new Set(
+        (existingIdRows || [])
+          .map((row) => row.external_id)
+          .filter(Boolean)
+      );
+
+      const afterIdCheck =
+        candidates.filter((item) => {
+          if (
+            existingIds.has(
+              item.original.id
+            )
+          ) {
+            duplicateIdsSkipped++;
+            return false;
           }
 
-          return {
-            external_id: question.id,
+          return true;
+        });
+
+      /*
+        We also need to protect against the
+        same question having a different API ID.
+
+        Fetch the current question text from
+        the database and compare normalized
+        versions locally.
+      */
+      const {
+        data: existingQuestions,
+        error: questionCheckError,
+      } = await supabase
+        .from("question_bank")
+        .select("question");
+
+      if (questionCheckError) {
+        throw questionCheckError;
+      }
+
+      const existingNormalized =
+        new Set(
+          (existingQuestions || [])
+            .map((row) =>
+              normalizeText(row.question)
+            )
+            .filter(Boolean)
+        );
+
+      const finalCandidates =
+        afterIdCheck.filter((item) => {
+          if (
+            existingNormalized.has(
+              item.normalized
+            )
+          ) {
+            duplicateTextSkipped++;
+            return false;
+          }
+
+          return true;
+        });
+
+      const rows =
+        finalCandidates.map(
+          ({ original }) => ({
+            external_id: original.id,
 
             category:
-              chooseCategory(question),
+              chooseCategory(original),
 
             difficulty:
               difficultyToNumber(
-                question.difficulty
+                original.difficulty
               ),
 
-            question: questionText,
+            question:
+              original.question.text.trim(),
 
-            answer,
+            answer:
+              original.correctAnswer.trim(),
 
             accepted_answers: "",
 
@@ -352,12 +511,12 @@ export default async function handler(req, res) {
             source_name:
               "The Trivia API",
 
-            tags: question.tags || [],
+            tags:
+              original.tags || [],
 
             active: true,
-          };
-        })
-        .filter(Boolean);
+          })
+        );
 
       if (rows.length === 0) {
         batchResults.push({
@@ -365,52 +524,69 @@ export default async function handler(req, res) {
           category: apiCategory,
           received: questions.length,
           imported: 0,
+          reason:
+            "All questions already existed",
         });
 
         continue;
       }
 
-      const { data, error } = await supabase
-        .from("question_bank")
-        .upsert(rows, {
-          onConflict: "external_id",
-          ignoreDuplicates: true,
-        })
-        .select("id");
+      /*
+        Insert individually.
 
-      if (error) {
-        batchResults.push({
-          batch,
-          category: apiCategory,
-          error: error.message,
-        });
+        Normally this would be less efficient,
+        but we're dealing with small batches.
 
-        continue;
+        Most importantly: one unexpected
+        duplicate can NEVER kill the rest of
+        the batch.
+      */
+      let batchImported = 0;
+      let batchRejected = 0;
+
+      for (const row of rows) {
+        const { error } =
+          await supabase
+            .from("question_bank")
+            .insert(row);
+
+        if (error) {
+          if (
+            error.code === "23505" ||
+            error.message
+              ?.toLowerCase()
+              .includes("duplicate")
+          ) {
+            duplicateTextSkipped++;
+            batchRejected++;
+            continue;
+          }
+
+          console.error(
+            "Question insert error:",
+            error
+          );
+
+          batchRejected++;
+          continue;
+        }
+
+        batchImported++;
+        totalImported++;
       }
-
-      const batchImported =
-        data?.length || 0;
-
-      const batchDuplicates =
-        rows.length - batchImported;
-
-      imported += batchImported;
-
-      duplicatesSkipped +=
-        batchDuplicates;
 
       batchResults.push({
         batch,
         category: apiCategory,
         received: questions.length,
+        candidates: rows.length,
         imported: batchImported,
-        duplicatesSkipped:
-          batchDuplicates,
+        rejected: batchRejected,
       });
     }
 
     /*
-      Get the current total bank size.
+      Get exact current bank size.
     */
     const {
       count: totalQuestionBank,
@@ -423,10 +599,7 @@ export default async function handler(req, res) {
       });
 
     if (countError) {
-      console.error(
-        "Count error:",
-        countError
-      );
+      throw countError;
     }
 
     return res.status(200).json({
@@ -434,21 +607,34 @@ export default async function handler(req, res) {
 
       batchesAttempted: BATCHES,
 
-      received,
+      received: totalReceived,
 
-      imported,
+      imported: totalImported,
 
-      duplicatesSkipped,
+      duplicateIdsSkipped,
 
-      totalQuestionBank:
-        totalQuestionBank ?? "unknown",
+      duplicateTextSkipped,
+
+      totalQuestionBank,
+
+      remainingUntil5000:
+        Math.max(
+          0,
+          5000 -
+            (totalQuestionBank || 0)
+        ),
 
       batchResults,
 
       message:
-        `Imported ${imported} new unique questions. ` +
-        `Your bank now contains approximately ` +
-        `${totalQuestionBank ?? "unknown"} questions.`,
+        `Imported ${totalImported} new ` +
+        `unique questions. Bank now has ` +
+        `${totalQuestionBank} questions. ` +
+        `${Math.max(
+          0,
+          5000 -
+            (totalQuestionBank || 0)
+        )} remaining until 5,000.`,
     });
   } catch (error) {
     console.error(error);
