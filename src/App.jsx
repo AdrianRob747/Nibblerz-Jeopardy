@@ -1,124 +1,96 @@
-              </div>
-            </div>
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+import {
+  Trophy,
+  Users,
+  LogIn,
+  Plus,
+  CheckCircle2,
+  Clock3,
+  Crown,
+  RotateCcw,
+} from "lucide-react";
 
-            <div className="score-tabs">
-              <span className="active">
-                All time
-              </span>
-              <span>Today</span>
-            </div>
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase =
+  supabaseUrl && supabaseKey
+    ? createClient(supabaseUrl, supabaseKey)
+    : null;
 
-            <div className="leader-list">
-              {allTime.map((s, i) => {
-                const p = players.find(
-                  (p) =>
-                    p.id === s.player_id
-                );
+const norm = (s) =>
+  (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-                return (
-                  <div
-                    className={`leader-row ${
-                      s.player_id ===
-                      player?.id
-                        ? "my-row"
-                        : ""
-                    }`}
-                    key={s.id}
-                  >
-                    <span
-                      className={`rank rank-${
-                        i + 1
-                      }`}
-                    >
-                      {i === 0 ? (
-                        <Crown size={15} />
-                      ) : (
-                        i + 1
-                      )}
-                    </span>
+const todayKey = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+  }).format(new Date());
 
-                    <span className="leader-name">
-                      {p?.name || "Player"}
+const money = (n) =>
+  "$" + Number(n || 0).toLocaleString("en-US");
 
-                      {s.player_id ===
-                        player?.id && (
-                        <small>YOU</small>
-                      )}
-                    </span>
-
-                    <b>
-                      {money(
-                        s.total_score
-                      )}
-                    </b>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="today-card">
-              <div className="today-title">
-                <Clock3 size={15} />
-                TODAY'S SCORES
-              </div>
-
-              {daily.map((s) => (
-                <div
-                  className="daily-row"
-                  key={s.id}
-                >
-                  <span>
-                    {players.find(
-                      (p) =>
-                        p.id ===
-                        s.player_id
-                    )?.name || "Player"}
-                  </span>
-
-                  <b>
-                    {money(
-                      s.daily_score
-                    )}
-                  </b>
-                </div>
-              ))}
-            </div>
-
-            <div className="rules">
-              <b>HOW TO PLAY</b>
-
-              <p>
-                The player who controls the
-                board chooses the next clue.
-                That clue automatically opens
-                for everyone.
-              </p>
-
-              <p>
-                Everyone submits privately.
-                Correct answers earn the tile
-                value. The first player to
-                submit a correct answer controls
-                the next clue.
-              </p>
-            </div>
-          </aside>
-        </section>
-      )}
-
-      <footer className="footer">
-        <span>
-          DAILY JEOPARDY{" "}
-          <span className="gold-text">
-            •
-          </span>{" "}
-          FRIENDS EDITION
-        </span>
-
-        <span>BUILT FOR YOUR CREW</span>
-      </footer>
-    </main>
+function App() {
+  const [mode, setMode] = useState("home");
+  const [name, setName] = useState(
+    localStorage.getItem("dj_name") || ""
   );
-}
+  const [roomCode, setRoomCode] = useState(
+    new URLSearchParams(location.search).get("room") || ""
+  );
 
-export default App;
+  const [room, setRoom] = useState(null);
+  const [player, setPlayer] = useState(null);
+  const [players, setPlayers] = useState([]);
+  const [questions, setQuestions] = useState([]);
+  const [scores, setScores] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+
+  const [answer, setAnswer] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [host, setHost] = useState(false);
+  const [manualCorrect, setManualCorrect] = useState({});
+  const [daily, setDaily] = useState([]);
+  const [allTime, setAllTime] = useState([]);
+
+  const refreshRoom = useCallback(async (code) => {
+    if (!supabase || !code) return;
+
+    const { data: r, error: re } = await supabase
+      .from("rooms")
+      .select("*")
+      .eq("code", code.toUpperCase())
+      .maybeSingle();
+
+    if (re) {
+      setNotice(re.message);
+      return;
+    }
+
+    if (!r) {
+      setNotice("Room not found. Check the code or create a new room.");
+      return;
+    }
+
+    setRoom(r);
+
+    const [p, q, s, sub] = await Promise.all([
+      supabase
+        .from("players")
+        .select("*")
+        .eq("room_id", r.id)
+        .order("created_at"),
+
+      supabase
+        .from("questions")
+        .select(
+          "id,room_id,category,value,prompt,board_order,day_key,status"
+        )
+        .eq("room_id", r.id)
+        .order("board_order"),
