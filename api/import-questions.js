@@ -241,9 +241,12 @@ function chooseCategory(question) {
 
 export default async function handler(req, res) {
   try {
-    // Pick ONE category each time the importer runs.
-    // This keeps each request fast.
+    /*
+      Weighted toward what we actually want in Nibblerz.
 
+      Entertainment, music and sports appear more often.
+      History and geography are intentionally excluded.
+    */
     const categories = [
       "film_and_tv",
       "film_and_tv",
@@ -269,121 +272,190 @@ export default async function handler(req, res) {
       "arts_and_literature",
     ];
 
-    const apiCategory =
-      categories[
-        Math.floor(Math.random() * categories.length)
-      ];
+    /*
+      Each run does 5 batches of up to 50 questions.
 
-    const params = new URLSearchParams({
-      limit: "50",
-      categories: apiCategory,
-    });
+      Maximum attempted per run = 250.
 
-    const response = await fetch(
-      `${API_URL}?${params.toString()}`
-    );
+      Because external_id is unique, questions already in
+      Supabase are automatically skipped.
+    */
+    const BATCHES = 5;
 
-    if (!response.ok) {
-      throw new Error(
-        `Trivia API returned status ${response.status}`
+    let received = 0;
+    let imported = 0;
+    let duplicatesSkipped = 0;
+
+    const batchResults = [];
+
+    for (let batch = 1; batch <= BATCHES; batch++) {
+      const apiCategory =
+        categories[
+          Math.floor(Math.random() * categories.length)
+        ];
+
+      const params = new URLSearchParams({
+        limit: "50",
+        categories: apiCategory,
+      });
+
+      const response = await fetch(
+        `${API_URL}?${params.toString()}`
       );
-    }
 
-    const questions = await response.json();
+      if (!response.ok) {
+        batchResults.push({
+          batch,
+          category: apiCategory,
+          error: `Trivia API status ${response.status}`,
+        });
 
-    const rows = questions
-      .map((question) => {
-        const questionText =
-          question.question?.text?.trim();
+        continue;
+      }
 
-        const answer =
-          question.correctAnswer?.trim();
+      const questions = await response.json();
 
-        if (!questionText || !answer) {
-          return null;
-        }
+      received += questions.length;
 
-        return {
-          external_id: question.id,
+      const rows = questions
+        .map((question) => {
+          const questionText =
+            question.question?.text?.trim();
 
-          category:
-            chooseCategory(question),
+          const answer =
+            question.correctAnswer?.trim();
 
-          difficulty:
-            difficultyToNumber(
-              question.difficulty
-            ),
+          if (!questionText || !answer) {
+            return null;
+          }
 
-          question: questionText,
+          return {
+            external_id: question.id,
 
-          answer,
+            category:
+              chooseCategory(question),
 
-          accepted_answers: "",
+            difficulty:
+              difficultyToNumber(
+                question.difficulty
+              ),
 
-          source_url:
-            "https://the-trivia-api.com/",
+            question: questionText,
 
-          source_name:
-            "The Trivia API",
+            answer,
 
-          tags: question.tags || [],
+            accepted_answers: "",
 
-          active: true,
-        };
-      })
-      .filter(Boolean);
+            source_url:
+              "https://the-trivia-api.com/",
 
-    if (rows.length === 0) {
-      return res.status(200).json({
-        success: true,
-        imported: 0,
-        message:
-          "The API returned no usable questions.",
+            source_name:
+              "The Trivia API",
+
+            tags: question.tags || [],
+
+            active: true,
+          };
+        })
+        .filter(Boolean);
+
+      if (rows.length === 0) {
+        batchResults.push({
+          batch,
+          category: apiCategory,
+          received: questions.length,
+          imported: 0,
+        });
+
+        continue;
+      }
+
+      const { data, error } = await supabase
+        .from("question_bank")
+        .upsert(rows, {
+          onConflict: "external_id",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+
+      if (error) {
+        batchResults.push({
+          batch,
+          category: apiCategory,
+          error: error.message,
+        });
+
+        continue;
+      }
+
+      const batchImported =
+        data?.length || 0;
+
+      const batchDuplicates =
+        rows.length - batchImported;
+
+      imported += batchImported;
+
+      duplicatesSkipped +=
+        batchDuplicates;
+
+      batchResults.push({
+        batch,
+        category: apiCategory,
+        received: questions.length,
+        imported: batchImported,
+        duplicatesSkipped:
+          batchDuplicates,
       });
     }
 
     /*
-      Bulk upsert.
-
-      external_id has a UNIQUE index in Supabase,
-      so questions already imported are ignored.
+      Get the current total bank size.
     */
-
-    const { data, error } = await supabase
+    const {
+      count: totalQuestionBank,
+      error: countError,
+    } = await supabase
       .from("question_bank")
-      .upsert(rows, {
-        onConflict: "external_id",
-        ignoreDuplicates: true,
-      })
-      .select("id");
+      .select("*", {
+        count: "exact",
+        head: true,
+      });
 
-    if (error) {
-      throw error;
+    if (countError) {
+      console.error(
+        "Count error:",
+        countError
+      );
     }
-
-    const imported = data?.length || 0;
 
     return res.status(200).json({
       success: true,
 
-      apiCategory,
+      batchesAttempted: BATCHES,
 
-      received: questions.length,
+      received,
 
       imported,
 
-      duplicatesSkipped:
-        rows.length - imported,
+      duplicatesSkipped,
+
+      totalQuestionBank:
+        totalQuestionBank ?? "unknown",
+
+      batchResults,
 
       message:
-        `Received ${questions.length} questions. ` +
-        `Imported ${imported} new unique questions.`,
+        `Imported ${imported} new unique questions. ` +
+        `Your bank now contains approximately ` +
+        `${totalQuestionBank ?? "unknown"} questions.`,
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       success: false,
+
       error:
         error?.message ||
         "Unknown importer error",
