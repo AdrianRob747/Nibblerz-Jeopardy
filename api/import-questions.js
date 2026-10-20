@@ -16,6 +16,62 @@ function normalizeText(value = "") {
     .trim();
 }
 
+/*
+  Reject questions that don't work well for
+  open-answer Jeopardy-style gameplay.
+*/
+function isBadQuestion(question) {
+  const text =
+    question.question?.text?.trim() || "";
+
+  if (!text) return true;
+
+  const lower = text.toLowerCase();
+
+  const badPatterns = [
+    /which of (the )?following/i,
+    /select (the )?(correct|best)/i,
+    /true\s*(or|\/)\s*false/i,
+    /^(true|false)\??$/i,
+    /\b[a-d][\)\.:]\s+/i,
+    /\b[1-4][\)\.:]\s+/i,
+    /all of the above/i,
+    /none of the above/i,
+    /which statement/i,
+    /which option/i,
+  ];
+
+  if (
+    badPatterns.some((pattern) =>
+      pattern.test(text)
+    )
+  ) {
+    return true;
+  }
+
+  /*
+    Extremely short prompts tend to make
+    poor trivia clues.
+  */
+  if (text.length < 12) {
+    return true;
+  }
+
+  /*
+    Yes/no questions aren't a good fit.
+  */
+  if (
+    lower.startsWith("is it true") ||
+    lower.startsWith("is the") ||
+    lower.startsWith("is a ") ||
+    lower.startsWith("are the")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function difficultyToNumber(difficulty) {
   if (difficulty === "easy") {
     return Math.random() < 0.5 ? 1 : 2;
@@ -29,267 +85,519 @@ function difficultyToNumber(difficulty) {
 }
 
 function chooseCategory(question) {
-  const tags = (question.tags || []).map((tag) =>
-    String(tag).toLowerCase()
+  const tags = (question.tags || []).map(
+    (tag) =>
+      String(tag)
+        .toLowerCase()
+        .replace(/_/g, " ")
   );
 
-  const q = question.question?.text || "";
+  const prompt =
+    question.question?.text || "";
+
+  const apiCategory =
+    String(question.category || "")
+      .toLowerCase();
 
   const text = [
-    q,
-    question.category || "",
+    prompt,
     ...tags,
   ]
     .join(" ")
     .toLowerCase();
 
-  // SPORTS
+  const has = (...words) =>
+    words.some((word) =>
+      text.includes(word)
+    );
+
+  /*
+    SPORTS
+  */
 
   if (
-    text.includes("nfl") ||
-    text.includes("american football") ||
-    text.includes("super bowl")
+    has(
+      "nfl",
+      "american football",
+      "super bowl"
+    )
   ) {
     return "NFL";
   }
 
-  if (
-    text.includes("nba") ||
-    text.includes("basketball")
-  ) {
+  if (has("nba", "basketball")) {
     return "NBA";
   }
 
-  if (
-    text.includes("mlb") ||
-    text.includes("baseball")
-  ) {
+  if (has("mlb", "baseball")) {
     return "MLB";
   }
 
   if (
-    text.includes("nhl") ||
-    text.includes("ice hockey")
+    has(
+      "nhl",
+      "ice hockey",
+      "hockey"
+    )
   ) {
     return "NHL";
   }
 
   if (
-    text.includes("soccer") ||
-    text.includes("premier league") ||
-    text.includes("fifa") ||
-    text.includes("football club")
+    has(
+      "soccer",
+      "premier league",
+      "fifa",
+      "uefa",
+      "world cup"
+    )
   ) {
     return "SOCCER";
   }
 
   if (
-    text.includes("wrestling") ||
-    text.includes("wwe")
+    has(
+      "wwe",
+      "wrestling",
+      "professional wrestling"
+    )
   ) {
     return "WRESTLING";
   }
 
-  // GAMING
+  if (
+    has(
+      "olympics",
+      "olympic games"
+    )
+  ) {
+    return "OLYMPICS";
+  }
+
+  /*
+    VIDEO GAMES
+  */
 
   if (
-    text.includes("pokemon") ||
-    text.includes("pokémon")
+    has(
+      "pokemon",
+      "pokémon"
+    )
   ) {
     return "POKÉMON";
   }
 
   if (
-    text.includes("video game") ||
-    text.includes("gaming") ||
-    text.includes("playstation") ||
-    text.includes("xbox") ||
-    text.includes("nintendo")
+    has(
+      "video game",
+      "video games",
+      "gaming",
+      "playstation",
+      "xbox",
+      "nintendo",
+      "sega",
+      "steam"
+    )
   ) {
     return "VIDEO GAMES";
   }
 
-  // ANIMATION / COMICS
+  /*
+    COMICS / ANIMATION
+  */
 
-  if (
-    text.includes("anime") ||
-    text.includes("manga")
-  ) {
+  if (has("anime", "manga")) {
     return "ANIME";
   }
 
   if (
-    text.includes("cartoon") ||
-    text.includes("animation") ||
-    text.includes("animated")
-  ) {
-    return "CARTOONS";
-  }
-
-  if (
-    text.includes("marvel") ||
-    text.includes("avengers") ||
-    text.includes("spider-man") ||
-    text.includes("x-men")
+    has(
+      "marvel",
+      "avengers",
+      "spider-man",
+      "spiderman",
+      "x-men"
+    )
   ) {
     return "MARVEL";
   }
 
   if (
-    text.includes("dc comics") ||
-    text.includes("batman") ||
-    text.includes("superman")
+    has(
+      "dc comics",
+      "batman",
+      "superman",
+      "wonder woman",
+      "justice league"
+    )
   ) {
     return "DC COMICS";
   }
 
-  // MUSIC
+  if (
+    has(
+      "cartoon",
+      "cartoons",
+      "animation",
+      "animated"
+    )
+  ) {
+    return "CARTOONS";
+  }
+
+  /*
+    MUSIC
+  */
 
   if (
-    text.includes("hip hop") ||
-    text.includes("hip-hop") ||
-    text.includes("rapper") ||
-    text.includes("rap music")
+    has(
+      "hip hop",
+      "hip-hop",
+      "rapper",
+      "rap music"
+    )
   ) {
     return "HIP-HOP";
   }
 
   if (
-    text.includes("rock music") ||
-    text.includes("rock band")
+    has(
+      "rock music",
+      "rock band",
+      "heavy metal"
+    )
   ) {
     return "ROCK MUSIC";
   }
 
   if (
-    text.includes("music") ||
-    text.includes("singer") ||
-    text.includes("album") ||
-    text.includes("song") ||
-    text.includes("musician")
+    has(
+      "country music",
+      "country singer"
+    )
+  ) {
+    return "COUNTRY MUSIC";
+  }
+
+  if (
+    apiCategory === "music" ||
+    has(
+      "music",
+      "musician",
+      "singer",
+      "album",
+      "song",
+      "band"
+    )
   ) {
     return "MUSIC";
   }
 
-  // MOVIES / TV
+  /*
+    MOVIES / TELEVISION
+  */
 
-  if (text.includes("sitcom")) {
+  if (
+    has(
+      "sitcom",
+      "situation comedy"
+    )
+  ) {
     return "SITCOMS";
   }
 
-  if (text.includes("horror")) {
-    return "HORROR";
+  if (
+    has(
+      "horror movie",
+      "horror film"
+    )
+  ) {
+    return "HORROR MOVIES";
   }
 
   if (
-    text.includes("movie") ||
-    text.includes("film") ||
-    text.includes("cinema")
+    has(
+      "disney",
+      "pixar"
+    )
+  ) {
+    return "DISNEY & PIXAR";
+  }
+
+  if (
+    has(
+      "star wars"
+    )
+  ) {
+    return "STAR WARS";
+  }
+
+  if (
+    has(
+      "harry potter"
+    )
+  ) {
+    return "HARRY POTTER";
+  }
+
+  if (
+    has(
+      "movie",
+      "movies",
+      "film",
+      "cinema",
+      "academy award",
+      "oscar"
+    )
   ) {
     return "MOVIES";
   }
 
   if (
-    text.includes("television") ||
-    text.includes("tv show") ||
-    text.includes("tv series")
+    has(
+      "television",
+      "tv show",
+      "tv series",
+      "television series"
+    )
   ) {
     return "TV SHOWS";
   }
 
+  /*
+    CELEBRITIES
+  */
+
   if (
-    text.includes("celebrity") ||
-    text.includes("actor") ||
-    text.includes("actress")
+    has(
+      "celebrity",
+      "actor",
+      "actress"
+    )
   ) {
     return "CELEBRITIES";
   }
 
-  // OTHER FUN CATEGORIES
+  /*
+    FOOD
+  */
 
   if (
-    text.includes("car") ||
-    text.includes("automobile") ||
-    text.includes("vehicle")
+    apiCategory === "food_and_drink" ||
+    has(
+      "food",
+      "restaurant",
+      "cuisine",
+      "drink",
+      "cocktail",
+      "cooking"
+    )
+  ) {
+    return "FOOD & DRINK";
+  }
+
+  /*
+    CARS / TECHNOLOGY
+  */
+
+  if (
+    has(
+      "automobile",
+      "automotive",
+      "car manufacturer",
+      "car company",
+      "vehicle manufacturer"
+    )
   ) {
     return "CARS";
   }
 
   if (
-    text.includes("computer") ||
-    text.includes("technology") ||
-    text.includes("internet")
+    has(
+      "computer",
+      "technology",
+      "internet",
+      "software",
+      "smartphone"
+    )
   ) {
     return "TECH & INTERNET";
   }
 
+  /*
+    SCIENCE
+
+    This prevents science-related people and
+    concepts from accidentally becoming
+    POP CULTURE.
+  */
+
   if (
-    text.includes("food") ||
-    text.includes("restaurant") ||
-    text.includes("drink")
+    apiCategory === "science" ||
+    has(
+      "physics",
+      "chemistry",
+      "biology",
+      "astronomy",
+      "scientist",
+      "planet",
+      "space"
+    )
   ) {
-    return "FOOD & DRINK";
+    return "SCIENCE";
   }
 
-  // API CATEGORY FALLBACKS
+  /*
+    BOOKS / LITERATURE
+  */
 
-  const fallback = {
-    film_and_tv: "MOVIES & TV",
-    music: "MUSIC",
-    sport_and_leisure: "SPORTS",
-    society_and_culture: "POP CULTURE",
-    food_and_drink: "FOOD & DRINK",
-    science: "SCIENCE",
-    arts_and_literature: "ARTS & BOOKS",
-    general_knowledge: "RANDOM KNOWLEDGE",
-  };
+  if (
+    apiCategory ===
+      "arts_and_literature" ||
+    has(
+      "novel",
+      "author",
+      "book",
+      "literature",
+      "poet"
+    )
+  ) {
+    return "BOOKS & LITERATURE";
+  }
 
-  return (
-    fallback[question.category] ||
-    "RANDOM KNOWLEDGE"
-  );
+  /*
+    Society & Culture is NOT automatically
+    called Pop Culture anymore.
+
+    This is what caused people like Galileo,
+    John Calvin and Mencius to end up under
+    POP CULTURE previously.
+  */
+
+  if (
+    apiCategory ===
+    "society_and_culture"
+  ) {
+    if (
+      has(
+        "fashion",
+        "celebrity",
+        "social media",
+        "internet culture",
+        "pop culture"
+      )
+    ) {
+      return "POP CULTURE";
+    }
+
+    return "CULTURE & SOCIETY";
+  }
+
+  /*
+    Broad API fallbacks.
+  */
+
+  if (
+    apiCategory ===
+    "film_and_tv"
+  ) {
+    return "MOVIES & TV";
+  }
+
+  if (
+    apiCategory ===
+    "sport_and_leisure"
+  ) {
+    return "SPORTS";
+  }
+
+  if (
+    apiCategory ===
+    "general_knowledge"
+  ) {
+    return "RANDOM KNOWLEDGE";
+  }
+
+  return "RANDOM KNOWLEDGE";
 }
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
   try {
     /*
-      Heavily weighted toward entertainment,
-      sports, music and pop culture.
+      Four guaranteed categories per run.
 
-      History and geography are intentionally
-      not requested.
+      The fifth is a rotating bonus category.
+
+      No History or Geography API category.
     */
-    
-const categories = [
-  "film_and_tv",
-  "music",
-  "sport_and_leisure",
-  "society_and_culture",
-];
 
-const bonusCategories = [
-  "film_and_tv",
-  "music",
-  "sport_and_leisure",
-  "society_and_culture",
-  "food_and_drink",
-  "general_knowledge",
-  "science",
-  "arts_and_literature",
-];
+    const categories = [
+      "film_and_tv",
+      "music",
+      "sport_and_leisure",
+      "society_and_culture",
+    ];
 
-    /*
-      Five API requests per run.
-      Up to 250 questions received.
-    */
+    const bonusCategories = [
+      "film_and_tv",
+      "music",
+      "sport_and_leisure",
+      "society_and_culture",
+      "food_and_drink",
+      "general_knowledge",
+      "science",
+      "arts_and_literature",
+    ];
+
     const BATCHES = 5;
 
     let totalReceived = 0;
     let totalImported = 0;
+
     let duplicateIdsSkipped = 0;
     let duplicateTextSkipped = 0;
+    let badFormatSkipped = 0;
 
     const batchResults = [];
+
+    /*
+      Load existing questions once.
+
+      This is much better than downloading the
+      whole bank separately for every batch.
+    */
+
+    const {
+      data: existingRows,
+      error: existingError,
+    } = await supabase
+      .from("question_bank")
+      .select(
+        "external_id, question"
+      );
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    const existingIds = new Set(
+      (existingRows || [])
+        .map(
+          (row) => row.external_id
+        )
+        .filter(Boolean)
+    );
+
+    const existingText = new Set(
+      (existingRows || [])
+        .map((row) =>
+          normalizeText(row.question)
+        )
+        .filter(Boolean)
+    );
 
     for (
       let batch = 1;
@@ -298,22 +606,24 @@ const bonusCategories = [
     ) {
       let apiCategory;
 
-if (batch <= 4) {
-  apiCategory = categories[batch - 1];
-} else {
-  apiCategory =
-    bonusCategories[
-      Math.floor(
-        Math.random() *
-          bonusCategories.length
-      )
-    ];
-}
+      if (batch <= 4) {
+        apiCategory =
+          categories[batch - 1];
+      } else {
+        apiCategory =
+          bonusCategories[
+            Math.floor(
+              Math.random() *
+                bonusCategories.length
+            )
+          ];
+      }
 
-      const params = new URLSearchParams({
-        limit: "50",
-        categories: apiCategory,
-      });
+      const params =
+        new URLSearchParams({
+          limit: "50",
+          categories: apiCategory,
+        });
 
       const response = await fetch(
         `${API_URL}?${params.toString()}`
@@ -334,18 +644,24 @@ if (batch <= 4) {
       const questions =
         await response.json();
 
-      totalReceived += questions.length;
+      totalReceived +=
+        questions.length;
+
+      let batchImported = 0;
+      let batchBad = 0;
+      let batchDuplicates = 0;
 
       /*
-        First remove duplicates that occurred
-        inside this API response itself.
+        Prevent duplicates within this
+        particular API response too.
       */
-      const batchSeenIds = new Set();
-      const batchSeenText = new Set();
 
-      const candidates = [];
+      const localIds = new Set();
+      const localText = new Set();
 
-      for (const question of questions) {
+      for (
+        const question of questions
+      ) {
         const questionText =
           question.question?.text?.trim();
 
@@ -357,191 +673,94 @@ if (batch <= 4) {
           !questionText ||
           !answer
         ) {
+          batchBad++;
+          badFormatSkipped++;
+          continue;
+        }
+
+        /*
+          Reject multiple choice, T/F,
+          yes/no and other bad formats.
+        */
+
+        if (
+          isBadQuestion(question)
+        ) {
+          batchBad++;
+          badFormatSkipped++;
           continue;
         }
 
         const normalized =
           normalizeText(questionText);
 
+        /*
+          Duplicate API ID.
+        */
+
         if (
-          batchSeenIds.has(question.id)
+          existingIds.has(
+            question.id
+          ) ||
+          localIds.has(
+            question.id
+          )
         ) {
           duplicateIdsSkipped++;
+          batchDuplicates++;
           continue;
         }
+
+        /*
+          Duplicate question wording.
+        */
 
         if (
-          batchSeenText.has(normalized)
+          existingText.has(
+            normalized
+          ) ||
+          localText.has(
+            normalized
+          )
         ) {
           duplicateTextSkipped++;
+          batchDuplicates++;
           continue;
         }
 
-        batchSeenIds.add(question.id);
-        batchSeenText.add(normalized);
+        const row = {
+          external_id:
+            question.id,
 
-        candidates.push({
-          original: question,
-          normalized,
-        });
-      }
+          category:
+            chooseCategory(
+              question
+            ),
 
-      if (candidates.length === 0) {
-        batchResults.push({
-          batch,
-          category: apiCategory,
-          received: questions.length,
-          imported: 0,
-          reason:
-            "No usable candidates",
-        });
+          difficulty:
+            difficultyToNumber(
+              question.difficulty
+            ),
 
-        continue;
-      }
+          question:
+            questionText,
 
-      /*
-        Check which API IDs already exist.
-      */
-      const candidateIds =
-        candidates.map(
-          (item) => item.original.id
-        );
+          answer,
 
-      const {
-        data: existingIdRows,
-        error: idCheckError,
-      } = await supabase
-        .from("question_bank")
-        .select("external_id")
-        .in("external_id", candidateIds);
+          accepted_answers: "",
 
-      if (idCheckError) {
-        throw idCheckError;
-      }
+          source_url:
+            "https://the-trivia-api.com/",
 
-      const existingIds = new Set(
-        (existingIdRows || [])
-          .map((row) => row.external_id)
-          .filter(Boolean)
-      );
+          source_name:
+            "The Trivia API",
 
-      const afterIdCheck =
-        candidates.filter((item) => {
-          if (
-            existingIds.has(
-              item.original.id
-            )
-          ) {
-            duplicateIdsSkipped++;
-            return false;
-          }
+          tags:
+            question.tags || [],
 
-          return true;
-        });
+          active: true,
+        };
 
-      /*
-        We also need to protect against the
-        same question having a different API ID.
-
-        Fetch the current question text from
-        the database and compare normalized
-        versions locally.
-      */
-      const {
-        data: existingQuestions,
-        error: questionCheckError,
-      } = await supabase
-        .from("question_bank")
-        .select("question");
-
-      if (questionCheckError) {
-        throw questionCheckError;
-      }
-
-      const existingNormalized =
-        new Set(
-          (existingQuestions || [])
-            .map((row) =>
-              normalizeText(row.question)
-            )
-            .filter(Boolean)
-        );
-
-      const finalCandidates =
-        afterIdCheck.filter((item) => {
-          if (
-            existingNormalized.has(
-              item.normalized
-            )
-          ) {
-            duplicateTextSkipped++;
-            return false;
-          }
-
-          return true;
-        });
-
-      const rows =
-        finalCandidates.map(
-          ({ original }) => ({
-            external_id: original.id,
-
-            category:
-              chooseCategory(original),
-
-            difficulty:
-              difficultyToNumber(
-                original.difficulty
-              ),
-
-            question:
-              original.question.text.trim(),
-
-            answer:
-              original.correctAnswer.trim(),
-
-            accepted_answers: "",
-
-            source_url:
-              "https://the-trivia-api.com/",
-
-            source_name:
-              "The Trivia API",
-
-            tags:
-              original.tags || [],
-
-            active: true,
-          })
-        );
-
-      if (rows.length === 0) {
-        batchResults.push({
-          batch,
-          category: apiCategory,
-          received: questions.length,
-          imported: 0,
-          reason:
-            "All questions already existed",
-        });
-
-        continue;
-      }
-
-      /*
-        Insert individually.
-
-        Normally this would be less efficient,
-        but we're dealing with small batches.
-
-        Most importantly: one unexpected
-        duplicate can NEVER kill the rest of
-        the batch.
-      */
-      let batchImported = 0;
-      let batchRejected = 0;
-
-      for (const row of rows) {
         const { error } =
           await supabase
             .from("question_bank")
@@ -549,24 +768,51 @@ if (batch <= 4) {
 
         if (error) {
           if (
-            error.code === "23505" ||
+            error.code ===
+              "23505" ||
             error.message
               ?.toLowerCase()
-              .includes("duplicate")
+              .includes(
+                "duplicate"
+              )
           ) {
             duplicateTextSkipped++;
-            batchRejected++;
+            batchDuplicates++;
             continue;
           }
 
           console.error(
-            "Question insert error:",
+            "Insert error:",
             error
           );
 
-          batchRejected++;
+          batchBad++;
           continue;
         }
+
+        /*
+          Immediately add the new question
+          to our in-memory protection sets.
+
+          This prevents another batch in the
+          SAME importer run from adding it.
+        */
+
+        existingIds.add(
+          question.id
+        );
+
+        existingText.add(
+          normalized
+        );
+
+        localIds.add(
+          question.id
+        );
+
+        localText.add(
+          normalized
+        );
 
         batchImported++;
         totalImported++;
@@ -574,17 +820,23 @@ if (batch <= 4) {
 
       batchResults.push({
         batch,
-        category: apiCategory,
-        received: questions.length,
-        candidates: rows.length,
-        imported: batchImported,
-        rejected: batchRejected,
+        category:
+          apiCategory,
+        received:
+          questions.length,
+        imported:
+          batchImported,
+        duplicatesSkipped:
+          batchDuplicates,
+        badFormatSkipped:
+          batchBad,
       });
     }
 
     /*
-      Get exact current bank size.
+      Exact clean bank total.
     */
+
     const {
       count: totalQuestionBank,
       error: countError,
@@ -599,49 +851,58 @@ if (batch <= 4) {
       throw countError;
     }
 
-    return res.status(200).json({
-      success: true,
+    const remainingUntil5000 =
+      Math.max(
+        0,
+        5000 -
+          (totalQuestionBank || 0)
+      );
 
-      batchesAttempted: BATCHES,
+    return res
+      .status(200)
+      .json({
+        success: true,
 
-      received: totalReceived,
+        batchesAttempted:
+          BATCHES,
 
-      imported: totalImported,
+        received:
+          totalReceived,
 
-      duplicateIdsSkipped,
+        imported:
+          totalImported,
 
-      duplicateTextSkipped,
+        duplicateIdsSkipped,
 
-      totalQuestionBank,
+        duplicateTextSkipped,
 
-      remainingUntil5000:
-        Math.max(
-          0,
-          5000 -
-            (totalQuestionBank || 0)
-        ),
+        badFormatSkipped,
 
-      batchResults,
+        totalQuestionBank,
 
-      message:
-        `Imported ${totalImported} new ` +
-        `unique questions. Bank now has ` +
-        `${totalQuestionBank} questions. ` +
-        `${Math.max(
-          0,
-          5000 -
-            (totalQuestionBank || 0)
-        )} remaining until 5,000.`,
-    });
+        remainingUntil5000,
+
+        batchResults,
+
+        message:
+          `Imported ${totalImported} ` +
+          `new clean questions. ` +
+          `Rejected ${badFormatSkipped} ` +
+          `bad-format questions. ` +
+          `Bank now has ` +
+          `${totalQuestionBank} questions.`,
+      });
   } catch (error) {
     console.error(error);
 
-    return res.status(500).json({
-      success: false,
+    return res
+      .status(500)
+      .json({
+        success: false,
 
-      error:
-        error?.message ||
-        "Unknown importer error",
-    });
+        error:
+          error?.message ||
+          "Unknown importer error",
+      });
   }
 }
